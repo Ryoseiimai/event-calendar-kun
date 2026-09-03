@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>月間イベントカレンダー生成ツール</title>
+<style>
+  :root{
+    --theme-main:#1e3a6b;
+    --theme-cell:#f5f1ea;
+    --sat:#2f6fd6;
+    --sun:#e05a2b;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:#555;font-family:"Hiragino Sans","Noto Sans JP",sans-serif;}
+
+  /* ===== ツールバー(印刷時は非表示) ===== */
+  #toolbar{
+    background:#222;color:#fff;padding:8px 10px;display:flex;flex-wrap:wrap;
+    gap:6px;align-items:center;font-size:13px;position:sticky;top:0;z-index:100;
+  }
+  #toolbar button, #toolbar input, #toolbar select{
+    font-size:13px;padding:4px 8px;border-radius:4px;border:1px solid #888;
+    background:#333;color:#fff;cursor:pointer;
+  }
+  #toolbar input[type=number]{width:70px;cursor:text;}
+  #toolbar input[type=text]{cursor:text;background:#333;color:#fff;}
+  #toolbar label{display:flex;align-items:center;gap:4px;}
+  #toolbar .sep{width:1px;height:20px;background:#666;margin:0 4px;}
+
+  #paletteBar{
+    background:#333;padding:4px 10px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;
+  }
+  #paletteBar .emoji{
+    font-size:20px;cursor:pointer;padding:2px 4px;border-radius:4px;
+  }
+  #paletteBar .emoji:hover{background:#555;}
+  #paletteBar .hint{color:#ccc;font-size:12px;margin-left:8px;}
+
+  /* ===== プレビュー領域 (A4縦比 210:297) =====
+     画面ではJSでtransform:scaleして縮小表示するだけにし、
+     フォントサイズの自動計算は常に非スケール(実寸)の210mm×297mmで行う。
+     これにより画面でフィットした結果=印刷結果になる(印刷時にマスが
+     拡大されて文字が小さく見える不具合の修正)。 */
+  #stage{
+    display:flex;justify-content:center;padding:20px 10px;
+  }
+  #pageWrapper{
+    position:relative;
+  }
+  #page{
+    position:absolute;top:0;left:0;
+    transform-origin:top left;
+    background:var(--theme-main);
+    width:210mm;
+    height:297mm;
+    box-shadow:0 0 12px rgba(0,0,0,.5);
+    display:flex;flex-direction:column;
+    padding:6mm;
+    color:#fff;
+  }
+  #topRow{
+    display:flex;justify-content:space-between;align-items:flex-start;
+    padding:0 2mm 3mm 2mm;
+  }
+  #monthName{
+    font-size:7mm;font-weight:900;letter-spacing:1px;line-height:1;
+  }
+  #monthNum{
+    font-size:20mm;font-weight:900;line-height:0.8;letter-spacing:-1px;
+  }
+  #storeTitle{
+    text-align:center;color:#fff;font-weight:bold;font-size:4mm;
+    padding-bottom:2mm;
+  }
+  #storeTitle:empty{display:none;}
+
+  #grid{
+    flex:1;display:grid;
+    grid-template-columns:repeat(7,1fr);
+    grid-template-rows:auto 1fr;
+    gap:1mm;
+    min-height:0;
+  }
+  .wd{
+    background:var(--theme-cell);color:#111;font-weight:900;
+    display:flex;align-items:center;justify-content:center;
+    font-size:3.6mm;letter-spacing:0.5px;
+  }
+  .wd.sat{color:var(--sat);}
+  .wd.sun{color:var(--sun);}
+
+  #daysWrap{
+    grid-column:1/-1;
+    display:grid;grid-template-columns:repeat(7,1fr);gap:1mm;
+    flex:1;min-height:0;
+  }
+  .cell{
+    background:var(--theme-cell);color:#111;position:relative;
+    padding:1.5mm 2mm;overflow:hidden;display:flex;flex-direction:column;
+    min-height:0;
+  }
+  .cell.other-month{opacity:0.55;}
+  .cell.other-month .daynum{color:#999;}
+  .daynum{
+    font-weight:900;font-size:4.2mm;line-height:1;margin-bottom:0.8mm;flex:none;
+  }
+  .cell.sat .daynum{color:var(--sat);}
+  .cell.sun .daynum{color:var(--sun);}
+  .cell-body{
+    flex:1;min-height:0;overflow:hidden;
+    outline:none;font-weight:700;line-height:1.15;color:#111;
+    word-break:break-word;
+  }
+  .cell-body img.ev-img{
+    max-width:100%;display:block;border-radius:2px;
+  }
+  .cell.selected{outline:3px solid #ffcf40;outline-offset:-3px;z-index:5;}
+  .time-mark{
+    background:linear-gradient(transparent 55%, #8fd0e6 55%);
+    padding:0 1px;
+    white-space:nowrap;
+    word-break:keep-all;
+    display:inline-block;
+  }
+
+  /* ===== 印刷 =====
+     画面用のtransform縮小・絶対配置を解除し、等倍(210mm×297mm)でそのまま出力する。 */
+  @page{ size:A4 portrait; margin:0; }
+  @media print{
+    #toolbar,#paletteBar{display:none !important;}
+    #stage{padding:0;display:block;}
+    #pageWrapper{width:auto !important;height:auto !important;}
+    #page{
+      position:static !important;transform:none !important;
+      box-shadow:none;width:210mm;height:297mm;margin:0;
+    }
+    html,body{background:#fff;}
+    .cell.selected{outline:none;}
+  }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="prevMonth">◀ 前月</button>
+  <input type="number" id="yearInput" min="2000" max="2100">
+  <span>年</span>
+  <input type="number" id="monthInput" min="1" max="12">
+  <span>月</span>
+  <button id="nextMonth">次月 ▶</button>
+  <div class="sep"></div>
+  <label>店名等: <input type="text" id="storeInput" placeholder="(空なら非表示)" size="14"></label>
+  <div class="sep"></div>
+  <label>テーマ:
+    <select id="themeSelect">
+      <option value="navy">紺</option>
+      <option value="black">黒</option>
+      <option value="wine">えんじ</option>
+      <option value="green">緑</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="uniformSize"> 文字サイズ均一</label>
+  <div class="sep"></div>
+  <button id="copyPrevMonth">先月をコピー</button>
+  <button id="exportJson">書き出し</button>
+  <button id="importJsonBtn">読み込み</button>
+  <input type="file" id="importJsonFile" accept="application/json" style="display:none;">
+  <button id="printBtn">印刷/PDF保存</button>
+</div>
+
+<div id="paletteBar">
+  <span class="hint">選択中のマスに挿入 →</span>
+  <span class="emoji">🩷</span><span class="emoji">❤️</span><span class="emoji">🎮</span><span class="emoji">🍶</span>
+  <span class="emoji">🌮</span><span class="emoji">🗻</span><span class="emoji">🎉</span><span class="emoji">🍻</span>
+  <span class="emoji">🎤</span><span class="emoji">🏋️</span><span class="emoji">⚽</span><span class="emoji">🎳</span>
+  <span class="emoji">🎃</span><span class="emoji">🎄</span><span class="emoji">🎂</span><span class="emoji">🎊</span>
+  <span class="emoji">🌸</span><span class="emoji">🍺</span><span class="emoji">🥂</span><span class="emoji">🎌</span>
+  <span class="hint">画像: マスに貼り付け(Ctrl+V) or ドラッグ&ドロップ</span>
+</div>
+
+<div id="stage">
+  <div id="pageWrapper">
+    <div id="page">
+      <div id="topRow">
+        <div id="monthName"></div>
+        <div id="monthNum"></div>
+      </div>
+      <div id="storeTitle"></div>
+      <div id="grid">
+        <!-- 曜日ヘッダー + 日付マスをJSで生成 -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const STORAGE_PREFIX = "eventCalendarKun_"; // 年月ごとの保存キー接頭辞
+  const WEEKDAY_LABELS = ["MON","TUE","WED","THU","FRI","SAT","SUN"];
+  const THEME_COLORS = {
+    navy:{main:"#1e3a6b"},
+    black:{main:"#1a1a1a"},
+    wine:{main:"#6b1e2f"},
+    green:{main:"#1e6b3a"}
+  };
+  const MIN_FONT = 8;   // 自動縮小の下限px
+  const MAX_FONT = 64;  // 自動縮小の上限px(A4実寸のマス高さに対し十分大きく取る)
+
+  const $ = (sel)=>document.querySelector(sel);
+  const grid = $("#grid");
+  const monthNameEl = $("#monthName");
+  const monthNumEl = $("#monthNum");
+  const storeTitleEl = $("#storeTitle");
+  const yearInput = $("#yearInput");
+  const monthInput = $("#monthInput");
+  const storeInput = $("#storeInput");
+  const themeSelect = $("#themeSelect");
+  const uniformCheckbox = $("#uniformSize");
+
+  let currentYear = 2026;
+  let currentMonth = 9; // 1-12
+  let selectedCellKey = null; // "YYYY-MM-DD" 選択中マス(絵文字/画像挿入先)
+
+  // ---- 見本(sample.png)を忠実に転記した初期サンプルデータ ----
+  // 2026年9月のみに紐付く。他の年月は空のまま。
+  const SAMPLE_2026_09 = {
+    "2026-08-31":"20:00-\nディズニー好き会",
+    "2026-09-01":"20:00-\n男女飲み会 🩷",
+    "2026-09-02":"19:00-\n異業種交流会",
+    "2026-09-03":"20:00-\nラブタイプ会\n忠犬ハチ公\n最後の恋人多め！",
+    "2026-09-04":"20:00-\n1998年会",
+    "2026-09-05":"20:00-\n夏祭りイベント 🎆",
+    "2026-09-06":"18:00-\n男女飲み会 🩷",
+    "2026-09-07":"20:00-\nSwitch&ボドゲ会",
+    "2026-09-08":"21:00-\n夢を語る会",
+    "2026-09-09":"20:00-\n男女飲み会 🩷",
+    "2026-09-10":"21:00-\n京久保会",
+    "2026-09-11":"20:00-\nスマブラ会 🎮",
+    "2026-09-12":"21:00-\nマッスル合コン 💪",
+    "2026-09-13":"20:00-\n男女飲み会 🩷",
+    "2026-09-14":"20:00-\n長畑美咲会",
+    "2026-09-15":"20:00-\n大物会",
+    "2026-09-16":"11:00-\n性なるお茶会\n19:00-\n貸切",
+    "2026-09-17":"20:00-\nスポーツ会",
+    "2026-09-18":"20:00-\nシーシャ会",
+    "2026-09-19":"18:00-\n店舗経営者会\n20:00-\n1997年会",
+    "2026-09-20":"19:00-\n街コン 🩷\n22:00-\nマッスル合コン 💪",
+    "2026-09-21":"15:00-\nボドゲ会\n20:00-\n平成カラオケ会 🎤",
+    "2026-09-22":"18:00-\n落語家イベント\n20:00-\nフットサル打上",
+    "2026-09-23":"19:00-\n男女飲み会 🩷",
+    "2026-09-24":"20:00-\n静岡県人会 🗻",
+    "2026-09-25":"21:00-\nさなBirthday 🎉",
+    "2026-09-26":"18:00-\nクロちゃんタコス会 🌮\n21:00-\nMBTI会",
+    "2026-09-27":"19:00-\n貸切",
+    "2026-09-28":"19:00-\n沖縄好き会\n21:00-\n日本酒会 🍶",
+    "2026-09-29":"20:00-\nインフルエンサー会",
+    "2026-09-30":"20:00-\n男女飲み会 🩷"
+  };
+
+  function storageKey(y,m){ return STORAGE_PREFIX + y + "-" + String(m).padStart(2,"0"); }
+
+  function loadMonthData(y,m){
+    const raw = localStorage.getItem(storageKey(y,m));
+    if(raw){
+      try{ return JSON.parse(raw); }catch(e){ /* 壊れたデータは無視して空扱い */ }
+    }
+    // 初回起動(何も保存されていない)かつ2026年9月なら見本データを埋める
+    if(y===2026 && m===9 && localStorage.getItem(STORAGE_PREFIX+"seeded")!== "1"){
+      const seeded = {};
+      Object.keys(SAMPLE_2026_09).forEach(k=>{ seeded[k] = {text:SAMPLE_2026_09[k]}; });
+      return seeded;
+    }
+    return {};
+  }
+
+  function saveMonthData(y,m,data){
+    localStorage.setItem(storageKey(y,m), JSON.stringify(data));
+    if(y===2026 && m===9){ localStorage.setItem(STORAGE_PREFIX+"seeded","1"); }
+  }
+
+  let monthData = {}; // 現在表示中の月の日付データ {dateKey:{text? or html}}
+
+  function dateKey(y,m,d){
+    // m,d は表示用の実際の年月日(繰り上がり計算済み)を渡す想定
+    return y+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+  }
+
+  // 指定年月の1日がその月の何日目のグリッド開始位置になるか(月曜始まり)を計算し、
+  // 前月末・当月・翌月頭を含む日付リストを作る
+  function buildDaysList(year, month){
+    const first = new Date(year, month-1, 1);
+    // JSのgetDay(): 0=日,1=月...6=土 → 月曜始まりのオフセットに変換
+    const jsDay = first.getDay();
+    const leadingOffset = (jsDay===0)?6:(jsDay-1);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const totalCells = Math.ceil((leadingOffset + daysInMonth)/7)*7;
+    const list = [];
+    const start = new Date(year, month-1, 1 - leadingOffset);
+    for(let i=0;i<totalCells;i++){
+      const d = new Date(start);
+      d.setDate(start.getDate()+i);
+      list.push({
+        y:d.getFullYear(), m:d.getMonth()+1, d:d.getDate(),
+        inMonth: d.getMonth()+1===month && d.getFullYear()===year,
+        weekdayIdx: (d.getDay()===0)?6:(d.getDay()-1) // 0=MON...6=SUN
+      });
+    }
+    return list;
+  }
+
+  function applyTheme(name){
+    const c = THEME_COLORS[name] || THEME_COLORS.navy;
+    document.documentElement.style.setProperty("--theme-main", c.main);
+  }
+
+  // 行頭の時刻表記(例"20:00-")を水色マーカー付きspanで装飾する。
+  // 簡易実装: contenteditableの中身をテキスト行単位で見て正規表現一致した行頭だけ包む。
+  // 複雑なカーソル位置保持は行わず、focusが外れた時のみ再構築する(意図的な簡略化)。
+  function decorateTimeMarks(el){
+    const sel = window.getSelection();
+    const hadFocus = document.activeElement===el;
+    if(hadFocus) return; // 編集中は再構築しない(カーソル飛び防止のため装飾はblur時のみ)
+    // 既存の子要素のうち、テキストノード/BR/IMG/SPANのみを対象に行分割して再構成
+    const html = el.innerHTML;
+    if(el.dataset.decorated === html) return; // 変化なければ何もしない
+    const div = document.createElement("div");
+    div.innerHTML = html;
+    // <div>や<br>で区切られた行ごとに処理
+    const lines = htmlToLines(div);
+    const outParts = lines.map(line=>{
+      if(/^<img/i.test(line.trim())) return line; // 画像行はそのまま
+      const m = line.match(/^(\s*)(\d{1,2}:\d{2}-?)/);
+      if(m){
+        const rest = line.slice(m[0].length);
+        return m[1] + '<span class="time-mark">' + m[2] + '</span>' + rest;
+      }
+      return line;
+    });
+    const newHtml = outParts.join("<br>");
+    el.innerHTML = newHtml;
+    el.dataset.decorated = el.innerHTML;
+  }
+
+  function htmlToLines(containerDiv){
+    // innerHTML中の<div>/<br>を行区切りとみなして分割する簡易パーサー
+    // (意図的な簡略化: ネストしたブロック要素や複雑な貼付けHTMLには非対応。プレーンテキスト+br+img前提)
+    const html = containerDiv.innerHTML;
+    return html.split(/<div>|<\/div>|<br\s*\/?>/i).filter(s=>s!==undefined);
+  }
+
+  // マス内の本文が枠に収まる最大フォントサイズを二分探索的に求めて適用する
+  function autoFitFont(bodyEl){
+    if(uniformCheckbox.checked) return; // 均一モードは別関数でまとめて処理
+    fitOne(bodyEl);
+  }
+
+  // 1マスあたりの上限フォントサイズ。cellの横幅に対して極端に巨大な
+  // フォントにならないよう、64pxと「セル幅/3.2」の小さい方を採用する。
+  function getMaxFontFor(bodyEl){
+    const cell = bodyEl.closest(".cell");
+    const w = (cell && cell.clientWidth) ? cell.clientWidth : (bodyEl.clientWidth || MAX_FONT*3.2);
+    return Math.max(MIN_FONT, Math.min(MAX_FONT, w/3.2));
+  }
+
+  // 指定サイズでbodyEl(群)が枠に収まっているかを厳密に判定する。
+  // - 本文全体(画像込み)がscrollHeight/scrollWidthをはみ出していないか
+  // - 時刻span(.time-mark)が単体で折り返し/切れを起こしていないか(offsetWidthで判定)
+  // 判定前に必ずoffsetHeightを読んでレイアウトを確定させる。
+  // 注意: .cell-bodyはflex:1で高さが固定されるため、内容がその範囲に
+  // 収まっている場合はscrollHeightは常にclientHeightと等しくなる
+  // (scrollHeightはmax(内容の高さ, 自身の高さ)なので、内容が小さくても
+  // clientHeightを下回ることはない)。したがって判定は「同じならOK」の
+  // 等価判定にする必要があり、ここからマージンを引いてはいけない
+  // (引くと常にfalseになり最小サイズに落ちる不具合の原因だった)。
+  const FIT_EPS = 0.5; // 端数誤差だけの許容
+  function fitsWithin(bodyEl){
+    void bodyEl.offsetHeight; // レイアウト確定を強制
+    if(bodyEl.scrollHeight > bodyEl.clientHeight + FIT_EPS) return false;
+    if(bodyEl.scrollWidth > bodyEl.clientWidth + FIT_EPS) return false;
+    const marks = bodyEl.querySelectorAll(".time-mark");
+    for(let i=0;i<marks.length;i++){
+      if(marks[i].offsetWidth > bodyEl.clientWidth + FIT_EPS) return false;
+    }
+    return true;
+  }
+
+  // 画面表示時と印刷(PDF化)時でフォントのヒンティング/カーニングが
+  // 微妙に異なり、ぎりぎり収まったサイズが印刷では1px前後溢れることが
+  // あるため、判定で見つかった最大値からさらに数px差し引いて安全側に倒す。
+  const FIT_SAFETY_STEP = 2;
+
+  // CJKテキストの折り返しはフォントサイズに対して単調とは限らない
+  // (サイズを上げると折返し行数が減って逆に収まる、等が起こりうる)ため、
+  // 二分探索ではなく上限から1pxずつ下げる線形走査で「収まる最大値」を
+  // 確実に求める(整数px・最大64までなので探索コストは小さい)。
+  function fitOne(bodyEl){
+    const hiCap = Math.floor(getMaxFontFor(bodyEl));
+    let best = MIN_FONT;
+    for(let size=hiCap; size>=MIN_FONT; size--){
+      bodyEl.style.fontSize = size+"px";
+      if(fitsWithin(bodyEl)){ best = size; break; }
+    }
+    best = Math.max(MIN_FONT, best - FIT_SAFETY_STEP);
+    bodyEl.style.fontSize = best+"px";
+  }
+
+  function fitAllUniform(){
+    const bodies = Array.from(grid.querySelectorAll(".cell-body"));
+    if(bodies.length===0) return;
+    const hiCap = Math.floor(Math.min.apply(null, bodies.map(getMaxFontFor)));
+    let best = MIN_FONT;
+    for(let size=hiCap; size>=MIN_FONT; size--){
+      bodies.forEach(b=>b.style.fontSize = size+"px");
+      if(bodies.every(fitsWithin)){ best = size; break; }
+    }
+    best = Math.max(MIN_FONT, best - FIT_SAFETY_STEP);
+    bodies.forEach(b=>b.style.fontSize = best+"px");
+  }
+
+  function refitAll(){
+    if(uniformCheckbox.checked){
+      fitAllUniform();
+    }else{
+      // daysWrapの各週行はgrid-template-rowsで明示的に等分(1fr)している
+      // ため、各セルの高さは他セルの文字量に左右されず固定である。
+      // よってセルごとに独立して1回ずつ判定すればよい。
+      grid.querySelectorAll(".cell-body").forEach(fitOne);
+    }
+  }
+
+  // #page は常に210mm×297mmの実寸(=印刷と同じ寸法)でレイアウトし、
+  // 画面表示だけtransform:scaleで縮小する。offsetWidth/HeightはCSSの
+  // transformの影響を受けないため、フォント自動計算は常に実寸基準になる。
+  function fitPageScale(){
+    const page = $("#page");
+    const wrapper = $("#pageWrapper");
+    if(!page || !wrapper) return;
+    const naturalW = page.offsetWidth;
+    const naturalH = page.offsetHeight;
+    if(!naturalW || !naturalH) return;
+    const stagePaddingAllowance = 40; // #stageの左右パディング分の余裕
+    const availW = Math.max(100, window.innerWidth - stagePaddingAllowance);
+    const toolbarH = ($("#toolbar")?.offsetHeight||0) + ($("#paletteBar")?.offsetHeight||0);
+    const availH = Math.max(100, window.innerHeight - toolbarH - 40);
+    const scale = Math.min(availW/naturalW, availH/naturalH, 1);
+    page.style.transform = "scale(" + scale + ")";
+    wrapper.style.width = (naturalW*scale) + "px";
+    wrapper.style.height = (naturalH*scale) + "px";
+  }
+
+  function collectMonthDataFromDom(){
+    const data = {};
+    grid.querySelectorAll(".cell[data-in-month='1']").forEach(cell=>{
+      const key = cell.dataset.key;
+      const body = cell.querySelector(".cell-body");
+      if(body.innerHTML.trim()!==""){
+        data[key] = {html:body.innerHTML};
+      }
+    });
+    return data;
+  }
+
+  function persistCurrentMonth(){
+    monthData = collectMonthDataFromDom();
+    saveMonthData(currentYear, currentMonth, monthData);
+  }
+
+  function renderCalendar(){
+    grid.innerHTML = "";
+    monthData = loadMonthData(currentYear, currentMonth);
+
+    // 曜日ヘッダー
+    WEEKDAY_LABELS.forEach((label,idx)=>{
+      const wd = document.createElement("div");
+      wd.className = "wd" + (idx===5?" sat":idx===6?" sun":"");
+      wd.textContent = label;
+      grid.appendChild(wd);
+    });
+
+    const daysWrap = document.createElement("div");
+    daysWrap.id = "daysWrap";
+    grid.appendChild(daysWrap);
+
+    const days = buildDaysList(currentYear, currentMonth);
+    // 週の行数ぶんだけ明示的に等分の行高さ(1fr)を指定する。
+    // これを指定しない(auto任せの)場合、行の高さがその行の中で
+    // 一番文字が多いマスの内容量に応じて伸縮してしまい、フォント
+    // サイズの自動フィット計算(セルの高さを基準に判定)がセル自身の
+    // フォントサイズ次第で高さの答えが変わる循環参照に陥ってしまう
+    // (measured不能バグの原因だったため固定行高さに変更した)。
+    const weekRows = days.length / 7;
+    daysWrap.style.gridTemplateRows = `repeat(${weekRows}, 1fr)`;
+    days.forEach(day=>{
+      const key = dateKey(day.y, day.m, day.d);
+      const cell = document.createElement("div");
+      cell.className = "cell" + (day.inMonth?"":" other-month") +
+        (day.weekdayIdx===5?" sat":day.weekdayIdx===6?" sun":"");
+      cell.dataset.key = key;
+      cell.dataset.inMonth = day.inMonth?"1":"0";
+
+      const num = document.createElement("div");
+      num.className = "daynum";
+      num.textContent = day.d;
+      cell.appendChild(num);
+
+      const body = document.createElement("div");
+      body.className = "cell-body";
+      body.contentEditable = day.inMonth ? "true" : "false";
+      body.spellcheck = false;
+      const saved = monthData[key];
+      if(saved){
+        body.innerHTML = saved.html!==undefined ? saved.html : (saved.text||"").replace(/\n/g,"<br>");
+        decorateTimeMarks(body); // 初期描画時にも時刻装飾を通す(未装飾のまま割れて表示される不具合の修正)
+      }
+      cell.appendChild(body);
+
+      cell.addEventListener("click", ()=>{
+        grid.querySelectorAll(".cell.selected").forEach(c=>c.classList.remove("selected"));
+        cell.classList.add("selected");
+        selectedCellKey = key;
+      });
+
+      body.addEventListener("input", ()=>{
+        autoFitFont(body);
+        persistCurrentMonth();
+      });
+      body.addEventListener("blur", ()=>{
+        decorateTimeMarks(body);
+        autoFitFont(body);
+        persistCurrentMonth();
+      });
+      body.addEventListener("paste", (e)=>{
+        // 画像貼り付け対応。テキストはプレーンテキストとして貼る(装飾HTMLの混入を防ぐ意図的な簡略化)
+        const items = (e.clipboardData && e.clipboardData.items) || [];
+        let handledImage = false;
+        for(const item of items){
+          if(item.type.indexOf("image")===0){
+            e.preventDefault();
+            const file = item.getAsFile();
+            insertImageFile(body, file);
+            handledImage = true;
+            break;
+          }
+        }
+        if(!handledImage){
+          e.preventDefault();
+          const text = (e.clipboardData||window.clipboardData).getData("text/plain");
+          document.execCommand("insertText", false, text);
+        }
+      });
+      body.addEventListener("dragover", (e)=>{ e.preventDefault(); });
+      body.addEventListener("drop", (e)=>{
+        e.preventDefault();
+        const file = e.dataTransfer.files && e.dataTransfer.files[0];
+        if(file && file.type.indexOf("image")===0){
+          insertImageFile(body, file);
+        }
+      });
+
+      daysWrap.appendChild(cell);
+    });
+
+    monthNameEl.textContent = new Date(currentYear, currentMonth-1, 1)
+      .toLocaleString("en-US",{month:"long"}).toUpperCase();
+    monthNumEl.textContent = String(currentMonth).padStart(2,"0");
+
+    // レイアウト確定後にフォントサイズ自動計算(描画反映を待つ)
+    requestAnimationFrame(()=>{ requestAnimationFrame(refitAll); });
+  }
+
+  function fitAllAndScale(){
+    refitAll();
+    fitPageScale();
+  }
+
+  function insertImageFile(bodyEl, file){
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = document.createElement("img");
+      img.className = "ev-img";
+      img.src = reader.result;
+      bodyEl.appendChild(img);
+      autoFitFont(bodyEl);
+      persistCurrentMonth();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function gotoMonth(y,m){
+    persistCurrentMonth();
+    // 月またぎの正規化(0や13になった場合の繰り上げ/繰り下げ)
+    const d = new Date(y, m-1, 1);
+    currentYear = d.getFullYear();
+    currentMonth = d.getMonth()+1;
+    yearInput.value = currentYear;
+    monthInput.value = currentMonth;
+    renderCalendar();
+  }
+
+  // ---- ツールバー配線 ----
+  $("#prevMonth").addEventListener("click", ()=>gotoMonth(currentYear, currentMonth-1));
+  $("#nextMonth").addEventListener("click", ()=>gotoMonth(currentYear, currentMonth+1));
+  yearInput.addEventListener("change", ()=>gotoMonth(parseInt(yearInput.value,10)||currentYear, currentMonth));
+  monthInput.addEventListener("change", ()=>gotoMonth(currentYear, parseInt(monthInput.value,10)||currentMonth));
+
+  storeInput.addEventListener("input", ()=>{
+    storeTitleEl.textContent = storeInput.value;
+    localStorage.setItem(STORAGE_PREFIX+"storeName", storeInput.value);
+  });
+
+  themeSelect.addEventListener("change", ()=>{
+    applyTheme(themeSelect.value);
+    localStorage.setItem(STORAGE_PREFIX+"theme", themeSelect.value);
+  });
+
+  uniformCheckbox.addEventListener("change", ()=>{
+    localStorage.setItem(STORAGE_PREFIX+"uniform", uniformCheckbox.checked?"1":"0");
+    refitAll();
+  });
+
+  $("#copyPrevMonth").addEventListener("click", ()=>{
+    const d = new Date(currentYear, currentMonth-2, 1);
+    const prevData = loadMonthData(d.getFullYear(), d.getMonth()+1);
+    // 同じ「日付(day数)」の中身を当月の同じ日付にコピーする(要件どおり曜日位置は無視)
+    grid.querySelectorAll(".cell[data-in-month='1']").forEach(cell=>{
+      const dayNum = parseInt(cell.querySelector(".daynum").textContent,10);
+      const prevKey = dateKey(d.getFullYear(), d.getMonth()+1, dayNum);
+      const src = prevData[prevKey];
+      if(src){
+        const body = cell.querySelector(".cell-body");
+        body.innerHTML = src.html!==undefined ? src.html : (src.text||"").replace(/\n/g,"<br>");
+        decorateTimeMarks(body);
+        autoFitFont(body);
+      }
+    });
+    persistCurrentMonth();
+  });
+
+  $("#exportJson").addEventListener("click", ()=>{
+    persistCurrentMonth();
+    const payload = {
+      year: currentYear, month: currentMonth,
+      storeName: storeInput.value, theme: themeSelect.value,
+      uniform: uniformCheckbox.checked,
+      data: monthData
+    };
+    const blob = new Blob([JSON.stringify(payload,null,2)], {type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `calendar_${currentYear}_${String(currentMonth).padStart(2,"0")}.json`;
+    a.click();
+  });
+
+  $("#importJsonBtn").addEventListener("click", ()=> $("#importJsonFile").click());
+  $("#importJsonFile").addEventListener("change", (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      try{
+        const payload = JSON.parse(reader.result);
+        currentYear = payload.year; currentMonth = payload.month;
+        yearInput.value = currentYear; monthInput.value = currentMonth;
+        if(payload.storeName!==undefined){ storeInput.value = payload.storeName; storeTitleEl.textContent = payload.storeName; }
+        if(payload.theme){ themeSelect.value = payload.theme; applyTheme(payload.theme); }
+        if(payload.uniform!==undefined){ uniformCheckbox.checked = !!payload.uniform; }
+        saveMonthData(currentYear, currentMonth, payload.data||{});
+        renderCalendar();
+      }catch(err){
+        alert("読み込みに失敗しました: JSON形式を確認してください");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  });
+
+  $("#printBtn").addEventListener("click", ()=>{
+    persistCurrentMonth();
+    window.print();
+  });
+
+  // ---- 絵文字パレット ----
+  document.querySelectorAll("#paletteBar .emoji").forEach(span=>{
+    span.addEventListener("click", ()=>{
+      if(!selectedCellKey){ alert("先に絵文字を入れたいマスをクリックして選択してください"); return; }
+      const cell = grid.querySelector(`.cell[data-key="${selectedCellKey}"]`);
+      if(!cell || cell.dataset.inMonth!=="1") return;
+      const body = cell.querySelector(".cell-body");
+      body.innerHTML += span.textContent;
+      autoFitFont(body);
+      persistCurrentMonth();
+    });
+  });
+
+  window.addEventListener("resize", ()=>{
+    requestAnimationFrame(fitAllAndScale);
+  });
+
+  // 印刷直前に念のため実寸で再計算し、印刷後は画面用の縮小表示に戻す
+  window.addEventListener("beforeprint", refitAll);
+  window.addEventListener("afterprint", ()=>{
+    requestAnimationFrame(fitAllAndScale);
+  });
+
+  // ---- 初期化 ----
+  function init(){
+    const savedStore = localStorage.getItem(STORAGE_PREFIX+"storeName");
+    const savedTheme = localStorage.getItem(STORAGE_PREFIX+"theme");
+    const savedUniform = localStorage.getItem(STORAGE_PREFIX+"uniform");
+    if(savedStore!==null){
+      storeInput.value = savedStore; storeTitleEl.textContent = savedStore;
+    }else{
+      // 初回のみ既定の店名をシードする(以後ユーザーが空にしても上書きしない)
+      const defaultStore = "BARらびりんす";
+      storeInput.value = defaultStore; storeTitleEl.textContent = defaultStore;
+      localStorage.setItem(STORAGE_PREFIX+"storeName", defaultStore);
+    }
+    themeSelect.value = savedTheme || "navy";
+    applyTheme(themeSelect.value);
+    uniformCheckbox.checked = savedUniform==="1";
+
+    yearInput.value = currentYear;
+    monthInput.value = currentMonth;
+    renderCalendar();
+    fitPageScale();
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
