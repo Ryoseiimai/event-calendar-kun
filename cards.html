@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>イベント告知画像メーカー</title>
+<style>
+  :root{
+    --theme-main:#1e3a6b;
+    --theme-cell:#f5f1ea;
+    --sat:#2f6fd6;
+    --sun:#e05a2b;
+    --ivory:#f6f2e8;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:#333;color:#eee;font-family:"Hiragino Sans","Noto Sans JP",sans-serif;}
+
+  #toolbar{
+    background:#222;color:#fff;padding:8px 10px;display:flex;flex-wrap:wrap;
+    gap:6px;align-items:center;font-size:13px;position:sticky;top:0;z-index:100;
+  }
+  #toolbar button, #toolbar select{
+    font-size:13px;padding:5px 10px;border-radius:4px;border:1px solid #888;
+    background:#333;color:#fff;cursor:pointer;
+  }
+  #toolbar a.linkBtn{color:#fff;text-decoration:none;}
+  #toolbar .sep{width:1px;height:20px;background:#666;margin:0 4px;}
+
+  #main{display:flex;height:calc(100vh - 46px);}
+  #eventList{
+    width:280px;flex:none;overflow-y:auto;background:#262626;border-right:1px solid #444;
+  }
+  .evItem{
+    padding:10px 12px;border-bottom:1px solid #3a3a3a;cursor:pointer;font-size:13px;line-height:1.5;
+  }
+  .evItem:hover{background:#333;}
+  .evItem.selected{background:#1e3a6b;}
+  .evItem .d{font-weight:900;color:#8fd0e6;}
+  .evItem .n{font-weight:700;}
+
+  #previewArea{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto;padding:20px;}
+  #cardScaleWrap{position:relative;}
+  #cardEl{
+    background:var(--theme-main);color:var(--ivory);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    position:relative;overflow:hidden;
+    border:6px solid var(--ivory);
+    box-shadow:0 0 30px rgba(0,0,0,.6);
+  }
+  #cardBgImg{
+    position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;
+    filter:brightness(.55);
+  }
+  #cardGradient{
+    position:absolute;inset:0;z-index:1;
+    background:linear-gradient(180deg, rgba(0,0,0,0) 30%, rgba(0,0,0,.75) 100%);
+    display:none;
+  }
+  #cardStore{
+    position:relative;z-index:2;font-weight:900;font-size:2.4vw;letter-spacing:1px;
+    position:absolute;top:5%;left:0;right:0;text-align:center;
+  }
+  #cardCenter{
+    position:relative;z-index:2;text-align:center;padding:0 6%;
+  }
+  #cardDate{font-weight:900;line-height:1;display:flex;align-items:baseline;justify-content:center;gap:2%;}
+  #cardDate .wd{font-weight:900;}
+  #cardDate .wd.sat{color:var(--sat);}
+  #cardDate .wd.sun{color:var(--sun);}
+  #cardTime{font-weight:900;color:#8fd0e6;margin-top:2%;}
+  #cardName{font-weight:900;line-height:1.2;margin-top:4%;word-break:break-word;}
+
+  #emptyMsg{color:#aaa;font-size:14px;text-align:center;}
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <a class="linkBtn" href="index.html" id="backLink">◀ カレンダーに戻る</a>
+  <div class="sep"></div>
+  <label>サイズ:
+    <select id="sizeSelect">
+      <option value="square">正方形 1080×1080</option>
+      <option value="story">ストーリー 1080×1920</option>
+      <option value="wide">横 1920×1080</option>
+    </select>
+  </label>
+  <label>テーマ:
+    <select id="themeSelect">
+      <option value="navy">紺</option>
+      <option value="black">黒</option>
+      <option value="wine">えんじ</option>
+      <option value="green">緑</option>
+    </select>
+  </label>
+  <div class="sep"></div>
+  <button id="saveOneBtn">この1枚を保存</button>
+  <button id="saveAllBtn">この月を全部保存</button>
+  <div class="sep"></div>
+  <button id="saveCalendarBtn">月間カレンダーを画像で</button>
+</div>
+
+<div id="main">
+  <div id="eventList"></div>
+  <div id="previewArea">
+    <div id="cardScaleWrap">
+      <div id="cardEl">
+        <img id="cardBgImg" style="display:none;">
+        <div id="cardGradient"></div>
+        <div id="cardStore"></div>
+        <div id="cardCenter">
+          <div id="cardDate"></div>
+          <div id="cardTime"></div>
+          <div id="cardName"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 月間カレンダー画像保存用(非表示・index.html/slideshow.htmlと同じ描画) -->
+<div id="calHidden" style="position:fixed;left:-9999px;top:0;">
+  <div id="calPage" style="width:210mm;height:297mm;display:flex;flex-direction:column;padding:6mm;color:#fff;">
+    <div id="calTopRow" style="display:flex;justify-content:space-between;align-items:flex-start;padding:0 2mm 3mm 2mm;">
+      <div id="calMonthName" style="font-size:7mm;font-weight:900;letter-spacing:1px;line-height:1;"></div>
+      <div id="calMonthNum" style="font-size:20mm;font-weight:900;line-height:.8;letter-spacing:-1px;"></div>
+    </div>
+    <div id="calStoreTitle" style="text-align:center;font-weight:bold;font-size:4mm;padding-bottom:2mm;"></div>
+    <div id="calGrid" style="flex:1;display:grid;grid-template-columns:repeat(7,1fr);grid-template-rows:auto 1fr;gap:1mm;min-height:0;"></div>
+  </div>
+</div>
+
+<style>
+  #calHidden .cwd{background:var(--theme-cell);color:#111;font-weight:900;display:flex;align-items:center;justify-content:center;font-size:3.6mm;}
+  #calHidden .cwd.sat{color:var(--sat);} #calHidden .cwd.sun{color:var(--sun);}
+  #calHidden #calDaysWrap{grid-column:1/-1;display:grid;grid-template-columns:repeat(7,1fr);gap:1mm;flex:1;min-height:0;}
+  #calHidden .ccell{background:var(--theme-cell);color:#111;position:relative;padding:1.5mm 2mm;overflow:hidden;display:flex;flex-direction:column;min-height:0;}
+  #calHidden .ccell.other-month{opacity:.55;}
+  #calHidden .ccell.other-month .cdaynum{color:#999;}
+  #calHidden .cdaynum{font-weight:900;font-size:4.2mm;line-height:1;margin-bottom:.8mm;flex:none;}
+  #calHidden .ccell.sat .cdaynum{color:var(--sat);} #calHidden .ccell.sun .cdaynum{color:var(--sun);}
+  #calHidden .ccell-body{flex:1;min-height:0;overflow:hidden;font-weight:700;line-height:1.15;color:#111;word-break:break-word;}
+  #calHidden .ccell-body img.ev-img{max-width:100%;display:block;border-radius:2px;}
+  #calHidden .time-mark{background:linear-gradient(transparent 55%, #8fd0e6 55%);padding:0 1px;white-space:nowrap;word-break:keep-all;display:inline-block;}
+</style>
+
+<script src="common.js"></script>
+<script>
+(function(){
+  "use strict";
+  const $ = sel=>document.querySelector(sel);
+  const params = new URLSearchParams(window.location.search);
+
+  let currentYear = parseInt(params.get("y"),10) || new Date().getFullYear();
+  let currentMonth = parseInt(params.get("m"),10) || (new Date().getMonth()+1);
+  let sheetUrl = params.get("sheet") || "";
+
+  const SIZES = {
+    square:{w:1080,h:1080},
+    story:{w:1080,h:1920},
+    wide:{w:1920,h:1080}
+  };
+
+  let monthData = {};
+  let events = [];
+  let selectedIdx = -1;
+
+  $("#backLink").href = "index.html?y=" + currentYear + "&m=" + currentMonth + (sheetUrl?("&sheet="+encodeURIComponent(sheetUrl)):"");
+
+  function loadData(){
+    if(sheetUrl){
+      return CalKun.fetchSheetMonthEntries(sheetUrl, currentYear, currentMonth).then(byKey=>{
+        const data = {};
+        Object.keys(byKey).forEach(key=>{ data[key] = { html: CalKun.buildCellHtmlFromEntries(byKey[key]) }; });
+        monthData = data;
+      }).catch(()=>{ monthData = CalKun.loadMonthData(currentYear, currentMonth); });
+    }
+    monthData = CalKun.loadMonthData(currentYear, currentMonth);
+    return Promise.resolve();
+  }
+
+  function renderEventList(){
+    events = CalKun.extractEventsFromMonthData(monthData, currentYear, currentMonth);
+    const listEl = $("#eventList");
+    listEl.innerHTML = "";
+    if(events.length===0){
+      listEl.innerHTML = '<div id="emptyMsg">この月のイベントはまだありません</div>';
+      return;
+    }
+    events.forEach((ev,idx)=>{
+      const item = document.createElement("div");
+      item.className = "evItem";
+      item.innerHTML = `<span class="d">${ev.m}/${ev.d}</span> <span class="n">${CalKun.escapeHtmlText(ev.name||"(名称なし)")}</span>`;
+      item.addEventListener("click", ()=>selectEvent(idx));
+      listEl.appendChild(item);
+    });
+    selectEvent(0);
+  }
+
+  function selectEvent(idx){
+    selectedIdx = idx;
+    document.querySelectorAll(".evItem").forEach((el,i)=>el.classList.toggle("selected", i===idx));
+    renderCard(events[idx]);
+  }
+
+  function weekdayLabelJa(y,m,d){ return ["SUN","MON","TUE","WED","THU","FRI","SAT"][new Date(y,m-1,d).getDay()]; }
+  function isSat(y,m,d){ return new Date(y,m-1,d).getDay()===6; }
+  function isSun(y,m,d){ return new Date(y,m-1,d).getDay()===0; }
+
+  function currentSize(){
+    return SIZES[$("#sizeSelect").value] || SIZES.square;
+  }
+
+  function renderCard(ev){
+    const size = currentSize();
+    const card = $("#cardEl");
+    card.style.width = size.w + "px";
+    card.style.height = size.h + "px";
+
+    const storeName = localStorage.getItem(CalKun.STORAGE_PREFIX+"storeName") || "";
+    $("#cardStore").textContent = storeName;
+    $("#cardStore").style.fontSize = Math.round(size.w*0.028) + "px";
+
+    if(!ev){
+      $("#cardDate").innerHTML = "";
+      $("#cardTime").textContent = "";
+      $("#cardName").textContent = "";
+      $("#cardBgImg").style.display = "none";
+      $("#cardGradient").style.display = "none";
+      fitScaleWrap(size);
+      return;
+    }
+
+    const wd = weekdayLabelJa(ev.y, ev.m, ev.d);
+    const wdClass = isSat(ev.y,ev.m,ev.d) ? "sat" : isSun(ev.y,ev.m,ev.d) ? "sun" : "";
+    $("#cardDate").innerHTML = `${ev.m}/${ev.d} <span class="wd ${wdClass}">${wd}</span>`;
+    $("#cardDate").style.fontSize = Math.round(size.w*0.09) + "px";
+    $("#cardDate .wd").style.fontSize = Math.round(size.w*0.05) + "px";
+
+    $("#cardTime").textContent = ev.time || "";
+    $("#cardTime").style.fontSize = Math.round(size.w*0.055) + "px";
+
+    const nameEl = $("#cardName");
+    nameEl.textContent = ev.name || "";
+
+    if(ev.imgUrl){
+      $("#cardBgImg").src = ev.imgUrl;
+      $("#cardBgImg").style.display = "block";
+      $("#cardGradient").style.display = "block";
+    }else{
+      $("#cardBgImg").style.display = "none";
+      $("#cardGradient").style.display = "none";
+    }
+
+    fitScaleWrap(size);
+    requestAnimationFrame(()=>{
+      CalKun.fitTextToContainer(nameEl, $("#cardCenter"), {min:24, max: Math.round(size.w*0.14), step:3});
+    });
+  }
+
+  function fitScaleWrap(size){
+    const availW = document.getElementById("previewArea").clientWidth - 40;
+    const availH = document.getElementById("previewArea").clientHeight - 40;
+    const scale = Math.min(availW/size.w, availH/size.h, 1);
+    $("#cardEl").style.transform = "scale(" + scale + ")";
+    $("#cardEl").style.transformOrigin = "center center";
+    $("#cardScaleWrap").style.width = (size.w*scale) + "px";
+    $("#cardScaleWrap").style.height = (size.h*scale) + "px";
+  }
+
+  $("#sizeSelect").addEventListener("change", ()=>{ renderCard(events[selectedIdx]); });
+  $("#themeSelect").addEventListener("change", ()=>{
+    CalKun.applyTheme($("#themeSelect").value);
+    localStorage.setItem(CalKun.STORAGE_PREFIX+"theme", $("#themeSelect").value);
+    renderCard(events[selectedIdx]);
+  });
+  window.addEventListener("resize", ()=>{ fitScaleWrap(currentSize()); });
+
+  // ---- 画像保存 ----
+  function captureCard(){
+    return new Promise((resolve,reject)=>{
+      CalKun.loadHtml2Canvas(()=>{
+        const prevTransform = $("#cardEl").style.transform;
+        $("#cardEl").style.transform = "none";
+        window.html2canvas($("#cardEl"), { scale:2, useCORS:true }).then(canvas=>{
+          $("#cardEl").style.transform = prevTransform;
+          resolve(canvas);
+        }).catch(err=>{ $("#cardEl").style.transform = prevTransform; reject(err); });
+      }, reject);
+    });
+  }
+
+  function downloadCanvas(canvas, filename){
+    const a = document.createElement("a");
+    a.download = filename;
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  }
+
+  $("#saveOneBtn").addEventListener("click", ()=>{
+    if(selectedIdx<0 || !events[selectedIdx]) return;
+    captureCard().then(canvas=>{
+      const ev = events[selectedIdx];
+      downloadCanvas(canvas, `event_${ev.key}.png`);
+    }).catch(err=>alert("画像の生成に失敗しました: " + (err&&err.message||err)));
+  });
+
+  // 連続保存: ブラウザのダウンロード連続実行対策で1件ずつ間隔を空けて実行する
+  async function saveAllSequential(){
+    for(let i=0;i<events.length;i++){
+      selectEvent(i);
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+      try{
+        const canvas = await captureCard();
+        downloadCanvas(canvas, `event_${events[i].key}.png`);
+      }catch(err){ /* 1件失敗しても続行(意図的な簡略化: 個別エラー通知はしない) */ }
+      await new Promise(r=>setTimeout(r, 350));
+    }
+  }
+  $("#saveAllBtn").addEventListener("click", ()=>{
+    if(events.length===0) return;
+    saveAllSequential();
+  });
+
+  // ---- 月間カレンダーを画像で ----
+  function renderHiddenCalendar(){
+    const grid = $("#calGrid");
+    grid.innerHTML = "";
+    CalKun.WEEKDAY_LABELS.forEach((label,idx)=>{
+      const wd = document.createElement("div");
+      wd.className = "cwd" + (idx===5?" sat":idx===6?" sun":"");
+      wd.textContent = label;
+      grid.appendChild(wd);
+    });
+    const daysWrap = document.createElement("div");
+    daysWrap.id = "calDaysWrap";
+    grid.appendChild(daysWrap);
+    const days = CalKun.buildDaysList(currentYear, currentMonth);
+    daysWrap.style.gridTemplateRows = `repeat(${days.length/7}, 1fr)`;
+    days.forEach(day=>{
+      const key = CalKun.dateKey(day.y, day.m, day.d);
+      const cell = document.createElement("div");
+      cell.className = "ccell" + (day.inMonth?"":" other-month") +
+        (day.weekdayIdx===5?" sat":day.weekdayIdx===6?" sun":"");
+      const num = document.createElement("div");
+      num.className = "cdaynum";
+      num.textContent = day.d;
+      cell.appendChild(num);
+      const body = document.createElement("div");
+      body.className = "ccell-body";
+      const saved = monthData[key];
+      if(saved){
+        body.innerHTML = saved.html!==undefined ? saved.html : (saved.text||"").replace(/\n/g,"<br>");
+        body.dataset.decorated = "";
+        CalKun.decorateTimeMarks(body);
+      }
+      cell.appendChild(body);
+      daysWrap.appendChild(cell);
+    });
+    $("#calMonthName").textContent = new Date(currentYear, currentMonth-1, 1).toLocaleString("en-US",{month:"long"}).toUpperCase();
+    $("#calMonthNum").textContent = String(currentMonth).padStart(2,"0");
+    $("#calStoreTitle").textContent = localStorage.getItem(CalKun.STORAGE_PREFIX+"storeName") || "";
+    const themeMain = getComputedStyle(document.documentElement).getPropertyValue("--theme-main").trim() || "#1e3a6b";
+    $("#calPage").style.background = themeMain;
+    requestAnimationFrame(()=>{
+      requestAnimationFrame(()=>{
+        grid.querySelectorAll(".ccell-body").forEach(CalKun.fitOne);
+      });
+    });
+  }
+
+  $("#saveCalendarBtn").addEventListener("click", ()=>{
+    renderHiddenCalendar();
+    setTimeout(()=>{
+      CalKun.loadHtml2Canvas(()=>{
+        const themeMain = getComputedStyle(document.documentElement).getPropertyValue("--theme-main").trim() || "#1e3a6b";
+        window.html2canvas($("#calPage"), { scale:2, backgroundColor:themeMain, useCORS:true }).then(canvas=>{
+          downloadCanvas(canvas, `calendar_${currentYear}-${String(currentMonth).padStart(2,"0")}.png`);
+        }).catch(err=>alert("画像の生成に失敗しました: " + (err&&err.message||err)));
+      }, ()=>alert("ネット接続が必要です(html2canvasの読み込みに失敗しました)"));
+    }, 100);
+  });
+
+  function init(){
+    const savedTheme = localStorage.getItem(CalKun.STORAGE_PREFIX+"theme") || "navy";
+    $("#themeSelect").value = savedTheme;
+    CalKun.applyTheme(savedTheme);
+    loadData().then(()=>{
+      renderEventList();
+    });
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

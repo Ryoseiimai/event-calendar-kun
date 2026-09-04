@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>イベントカレンダー スライドショー</title>
+<style>
+  :root{
+    --theme-main:#1e3a6b;
+    --theme-cell:#f5f1ea;
+    --sat:#2f6fd6;
+    --sun:#e05a2b;
+    --ivory:#f6f2e8;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;padding:0;width:100%;height:100%;overflow:hidden;
+    background:var(--theme-main);color:var(--ivory);
+    font-family:"Hiragino Sans","Noto Sans JP",sans-serif;
+  }
+  #stageWrap{
+    position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:var(--theme-main);
+  }
+  .slide{
+    position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+    opacity:0;transition:opacity .6s ease;pointer-events:none;
+  }
+  .slide.active{opacity:1;pointer-events:auto;}
+
+  /* ---- 月間カレンダースライド ---- */
+  #calSlide{ padding:2vh 2vw; }
+  #calSlide #calScaleWrap{ position:relative; }
+  #calSlide #calPage{
+    background:var(--theme-main);
+    width:210mm;height:297mm;
+    transform-origin:top left;
+    display:flex;flex-direction:column;padding:6mm;color:#fff;
+    box-shadow:0 0 30px rgba(0,0,0,.5);
+  }
+  #calTopRow{display:flex;justify-content:space-between;align-items:flex-start;padding:0 2mm 3mm 2mm;}
+  #calMonthName{font-size:7mm;font-weight:900;letter-spacing:1px;line-height:1;}
+  #calMonthNum{font-size:20mm;font-weight:900;line-height:.8;letter-spacing:-1px;}
+  #calStoreTitle{text-align:center;color:#fff;font-weight:bold;font-size:4mm;padding-bottom:2mm;}
+  #calStoreTitle:empty{display:none;}
+  #calGrid{flex:1;display:grid;grid-template-columns:repeat(7,1fr);grid-template-rows:auto 1fr;gap:1mm;min-height:0;}
+  .cwd{background:var(--theme-cell);color:#111;font-weight:900;display:flex;align-items:center;justify-content:center;font-size:3.6mm;}
+  .cwd.sat{color:var(--sat);} .cwd.sun{color:var(--sun);}
+  #calDaysWrap{grid-column:1/-1;display:grid;grid-template-columns:repeat(7,1fr);gap:1mm;flex:1;min-height:0;}
+  .ccell{background:var(--theme-cell);color:#111;position:relative;padding:1.5mm 2mm;overflow:hidden;display:flex;flex-direction:column;min-height:0;}
+  .ccell.other-month{opacity:.55;}
+  .ccell.other-month .cdaynum{color:#999;}
+  .cdaynum{font-weight:900;font-size:4.2mm;line-height:1;margin-bottom:.8mm;flex:none;}
+  .ccell.sat .cdaynum{color:var(--sat);} .ccell.sun .cdaynum{color:var(--sun);}
+  .ccell.today{outline:1.2mm solid #ff4d4d;outline-offset:-1.2mm;}
+  .ccell-body{flex:1;min-height:0;overflow:hidden;font-weight:700;line-height:1.15;color:#111;word-break:break-word;}
+  .ccell-body img.ev-img{max-width:100%;display:block;border-radius:2px;}
+  .time-mark{background:linear-gradient(transparent 55%, #8fd0e6 55%);padding:0 1px;white-space:nowrap;word-break:keep-all;display:inline-block;}
+
+  /* ---- イベント単体スライド ---- */
+  .evSlide{ flex-direction:row; width:100%; height:100%; padding:4vh 5vw; gap:4vw; }
+  .evSlide .evLeft{ flex:1; display:flex; flex-direction:column; justify-content:center; min-width:0; }
+  .evSlide.has-img .evLeft{ flex:1.1; }
+  .evSlide .evRight{ flex:1; display:flex; align-items:center; justify-content:center; min-width:0; height:100%; }
+  .evSlide .evRight img{ max-width:100%; max-height:90vh; object-fit:contain; border-radius:12px; box-shadow:0 0 40px rgba(0,0,0,.5); }
+  .evDate{ font-size:7vw; font-weight:900; line-height:1; display:flex; align-items:baseline; gap:1.5vw; }
+  .evDate .wd{ font-size:4vw; font-weight:900; }
+  .evDate .wd.sat{ color:var(--sat); }
+  .evDate .wd.sun{ color:var(--sun); }
+  .evTime{ font-size:5vw; font-weight:900; margin-top:2vh; color:#8fd0e6; }
+  .evName{ font-size:9vw; font-weight:900; line-height:1.15; margin-top:3vh; word-break:break-word; overflow-wrap:break-word; }
+  .todayBadge{
+    display:inline-block; background:#e02b2b; color:#fff; font-weight:900;
+    font-size:2.4vw; padding:.6vh 2vw; border-radius:999px; margin-bottom:2vh;
+  }
+
+  /* ---- 設定パネル ---- */
+  #settingsPanel{
+    position:fixed; right:16px; bottom:16px; background:rgba(0,0,0,.7); color:#fff;
+    padding:10px 14px; border-radius:10px; font-size:12px; display:flex; flex-direction:column; gap:6px;
+    opacity:0; pointer-events:none; transition:opacity .3s ease; z-index:50; max-width:280px;
+  }
+  #settingsPanel.show{ opacity:1; pointer-events:auto; }
+  #settingsPanel label{ display:flex; align-items:center; gap:6px; }
+  #settingsPanel input[type=text]{ width:160px; }
+  #settingsPanel input, #settingsPanel button{ font-size:12px; }
+  #settingsPanel button{ cursor:pointer; }
+
+  #pauseBadge{
+    position:fixed; top:16px; left:16px; background:rgba(0,0,0,.6); color:#fff;
+    padding:4px 10px; border-radius:6px; font-size:13px; display:none; z-index:50;
+  }
+  #pauseBadge.show{ display:block; }
+</style>
+</head>
+<body>
+
+<div id="stageWrap">
+  <div class="slide" id="calSlide">
+    <div id="calScaleWrap">
+      <div id="calPage">
+        <div id="calTopRow">
+          <div id="calMonthName"></div>
+          <div id="calMonthNum"></div>
+        </div>
+        <div id="calStoreTitle"></div>
+        <div id="calGrid"></div>
+      </div>
+    </div>
+  </div>
+  <!-- イベントスライドはJSで動的生成してここに挿入 -->
+</div>
+
+<div id="pauseBadge">一時停止中(スペースで再生)</div>
+
+<div id="settingsPanel">
+  <label>秒数: <input type="number" id="secInput" min="2" max="60" style="width:50px;"></label>
+  <label>シートURL: <input type="text" id="sheetInput" placeholder="スプレッドシートのURL"></label>
+  <label><input type="checkbox" id="todayOnlyInput"> 今日〜7日先のみ</label>
+  <div style="display:flex;gap:6px;">
+    <button id="applySettingsBtn">反映</button>
+    <button id="fullscreenBtn">全画面(F)</button>
+  </div>
+</div>
+
+<script src="common.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  const $ = sel=>document.querySelector(sel);
+  const params = new URLSearchParams(window.location.search);
+
+  let currentYear = parseInt(params.get("y"),10) || new Date().getFullYear();
+  let currentMonth = parseInt(params.get("m"),10) || (new Date().getMonth()+1);
+  let sheetUrl = params.get("sheet") || "";
+  let secPerSlide = parseInt(params.get("sec"),10) || 8;
+  let todayOnly = params.get("today") === "1";
+
+  let monthData = {};
+  let events = [];
+  let slideEls = []; // [{type:'cal'}|{type:'ev', ev, el}]
+  let currentSlideIdx = 0;
+  let timerId = null;
+  let paused = false;
+
+  const todayKey = (()=>{
+    const d = new Date();
+    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  })();
+
+  function isWithinNextDays(key, days){
+    const now = new Date(); now.setHours(0,0,0,0);
+    const m = key.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(!m) return false;
+    const d = new Date(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10));
+    const diffDays = Math.round((d - now)/(1000*60*60*24));
+    return diffDays >= 0 && diffDays <= days;
+  }
+
+  function applyTheme(){
+    CalKun.applyTheme(localStorage.getItem(CalKun.STORAGE_PREFIX+"theme") || "navy");
+  }
+
+  function loadData(){
+    return new Promise((resolve)=>{
+      if(sheetUrl){
+        CalKun.fetchSheetMonthEntries(sheetUrl, currentYear, currentMonth).then(byKey=>{
+          const data = {};
+          Object.keys(byKey).forEach(key=>{
+            data[key] = { html: CalKun.buildCellHtmlFromEntries(byKey[key]) };
+          });
+          monthData = data;
+          resolve();
+        }).catch(()=>{
+          // シート取得失敗時はlocalStorageにフォールバック(意図的な簡略化: エラー表示はしない)
+          monthData = CalKun.loadMonthData(currentYear, currentMonth);
+          resolve();
+        });
+      }else{
+        monthData = CalKun.loadMonthData(currentYear, currentMonth);
+        resolve();
+      }
+    });
+  }
+
+  // ---- 月間カレンダースライドの描画(index.htmlのrenderCalendar相当) ----
+  function renderCalSlide(){
+    const grid = $("#calGrid");
+    grid.innerHTML = "";
+    CalKun.WEEKDAY_LABELS.forEach((label,idx)=>{
+      const wd = document.createElement("div");
+      wd.className = "cwd" + (idx===5?" sat":idx===6?" sun":"");
+      wd.textContent = label;
+      grid.appendChild(wd);
+    });
+    const daysWrap = document.createElement("div");
+    daysWrap.id = "calDaysWrap";
+    grid.appendChild(daysWrap);
+
+    const days = CalKun.buildDaysList(currentYear, currentMonth);
+    const weekRows = days.length/7;
+    daysWrap.style.gridTemplateRows = `repeat(${weekRows}, 1fr)`;
+    days.forEach(day=>{
+      const key = CalKun.dateKey(day.y, day.m, day.d);
+      const cell = document.createElement("div");
+      cell.className = "ccell" + (day.inMonth?"":" other-month") +
+        (day.weekdayIdx===5?" sat":day.weekdayIdx===6?" sun":"") +
+        (key===todayKey?" today":"");
+      const num = document.createElement("div");
+      num.className = "cdaynum";
+      num.textContent = day.d;
+      cell.appendChild(num);
+      const body = document.createElement("div");
+      body.className = "ccell-body";
+      const saved = monthData[key];
+      if(saved){
+        body.innerHTML = saved.html!==undefined ? saved.html : (saved.text||"").replace(/\n/g,"<br>");
+        body.dataset.decorated = "";
+        CalKun.decorateTimeMarks(body);
+      }
+      cell.appendChild(body);
+      daysWrap.appendChild(cell);
+    });
+
+    $("#calMonthName").textContent = new Date(currentYear, currentMonth-1, 1)
+      .toLocaleString("en-US",{month:"long"}).toUpperCase();
+    $("#calMonthNum").textContent = String(currentMonth).padStart(2,"0");
+    const storeName = localStorage.getItem(CalKun.STORAGE_PREFIX+"storeName") || "";
+    $("#calStoreTitle").textContent = storeName;
+
+    requestAnimationFrame(()=>{
+      requestAnimationFrame(()=>{
+        grid.querySelectorAll(".ccell-body").forEach(CalKun.fitOne);
+        fitCalPageScale();
+      });
+    });
+  }
+
+  function fitCalPageScale(){
+    const page = $("#calPage");
+    const wrap = $("#calScaleWrap");
+    const naturalW = page.offsetWidth, naturalH = page.offsetHeight;
+    if(!naturalW || !naturalH) return;
+    const availW = window.innerWidth * 0.94;
+    const availH = window.innerHeight * 0.94;
+    const scale = Math.min(availW/naturalW, availH/naturalH);
+    page.style.transform = "scale(" + scale + ")";
+    wrap.style.width = (naturalW*scale) + "px";
+    wrap.style.height = (naturalH*scale) + "px";
+  }
+
+  // ---- イベント単体スライドの生成 ----
+  function weekdayLabelJa(y,m,d){
+    const w = ["SUN","MON","TUE","WED","THU","FRI","SAT"][new Date(y,m-1,d).getDay()];
+    return w;
+  }
+  function isSat(y,m,d){ return new Date(y,m-1,d).getDay()===6; }
+  function isSun(y,m,d){ return new Date(y,m-1,d).getDay()===0; }
+
+  function buildEventSlideEl(ev){
+    const wrap = document.createElement("div");
+    wrap.className = "slide evSlide" + (ev.imgUrl ? " has-img" : "");
+    const isToday = ev.key === todayKey;
+    const wd = weekdayLabelJa(ev.y, ev.m, ev.d);
+    const wdClass = isSat(ev.y,ev.m,ev.d) ? "sat" : isSun(ev.y,ev.m,ev.d) ? "sun" : "";
+
+    const left = document.createElement("div");
+    left.className = "evLeft";
+    left.innerHTML = `
+      ${isToday ? '<div class="todayBadge">本日</div>' : ''}
+      <div class="evDate">${ev.m}/${ev.d} <span class="wd ${wdClass}">${wd}</span></div>
+      ${ev.time ? `<div class="evTime">${CalKun.escapeHtmlText(ev.time)}</div>` : ''}
+      <div class="evName">${CalKun.escapeHtmlText(ev.name || "")}</div>
+    `;
+    wrap.appendChild(left);
+
+    if(ev.imgUrl){
+      const right = document.createElement("div");
+      right.className = "evRight";
+      const img = document.createElement("img");
+      img.src = ev.imgUrl;
+      right.appendChild(img);
+      wrap.appendChild(right);
+    }
+    return wrap;
+  }
+
+  function fitEventNameFonts(){
+    slideEls.forEach(s=>{
+      if(s.type!=="ev") return;
+      const nameEl = s.el.querySelector(".evName");
+      const container = s.el.querySelector(".evLeft");
+      if(nameEl && container){
+        CalKun.fitTextToContainer(nameEl, container, {min:24, max: window.innerWidth*0.09, step:3});
+      }
+    });
+  }
+
+  function buildSlides(){
+    const stageWrap = $("#stageWrap");
+    // 既存のイベントスライドを除去(カレンダースライドは残す)
+    stageWrap.querySelectorAll(".evSlide").forEach(el=>el.remove());
+
+    events = CalKun.extractEventsFromMonthData(monthData, currentYear, currentMonth);
+    if(todayOnly){
+      events = events.filter(ev=>isWithinNextDays(ev.key, 7));
+    }
+
+    slideEls = [{type:"cal", el: $("#calSlide")}];
+    events.forEach(ev=>{
+      const el = buildEventSlideEl(ev);
+      stageWrap.appendChild(el);
+      slideEls.push({type:"ev", ev, el});
+    });
+
+    currentSlideIdx = 0;
+    showSlide(currentSlideIdx);
+    requestAnimationFrame(fitEventNameFonts);
+  }
+
+  function showSlide(idx){
+    slideEls.forEach(s=>s.el.classList.remove("active"));
+    if(slideEls.length===0) return;
+    currentSlideIdx = ((idx % slideEls.length) + slideEls.length) % slideEls.length;
+    const cur = slideEls[currentSlideIdx];
+    cur.el.classList.add("active");
+    if(cur.type==="cal"){
+      fitCalPageScale();
+    }
+  }
+
+  function nextSlide(){ showSlide(currentSlideIdx+1); }
+  function prevSlide(){ showSlide(currentSlideIdx-1); }
+
+  function startTimer(){
+    stopTimer();
+    if(paused) return;
+    timerId = setInterval(nextSlide, secPerSlide*1000);
+  }
+  function stopTimer(){
+    if(timerId){ clearInterval(timerId); timerId = null; }
+  }
+
+  // ---- 操作 ----
+  window.addEventListener("keydown", (e)=>{
+    if(e.key==="ArrowRight"){ nextSlide(); startTimer(); }
+    else if(e.key==="ArrowLeft"){ prevSlide(); startTimer(); }
+    else if(e.key===" "){ e.preventDefault(); togglePause(); }
+    else if(e.key==="f" || e.key==="F"){ toggleFullscreen(); }
+  });
+
+  function togglePause(){
+    paused = !paused;
+    $("#pauseBadge").classList.toggle("show", paused);
+    if(paused) stopTimer(); else startTimer();
+  }
+
+  function toggleFullscreen(){
+    if(!document.fullscreenElement){
+      document.documentElement.requestFullscreen().catch(()=>{});
+    }else{
+      document.exitFullscreen().catch(()=>{});
+    }
+  }
+  $("#fullscreenBtn").addEventListener("click", toggleFullscreen);
+
+  // ---- 設定パネル(マウス操作で表示/3秒で消える) ----
+  let hideTimer = null;
+  function showPanel(){
+    $("#settingsPanel").classList.add("show");
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(()=>{ $("#settingsPanel").classList.remove("show"); }, 3000);
+  }
+  window.addEventListener("mousemove", showPanel);
+
+  $("#applySettingsBtn").addEventListener("click", ()=>{
+    secPerSlide = parseInt($("#secInput").value,10) || secPerSlide;
+    sheetUrl = $("#sheetInput").value.trim();
+    todayOnly = $("#todayOnlyInput").checked;
+    reload();
+  });
+
+  window.addEventListener("resize", ()=>{
+    fitCalPageScale();
+    fitEventNameFonts();
+  });
+
+  function reload(){
+    applyTheme();
+    loadData().then(()=>{
+      renderCalSlide();
+      buildSlides();
+      startTimer();
+    });
+  }
+
+  // 60分ごとにシートを再取得(自動更新)
+  const AUTO_RELOAD_MS = 60*60*1000;
+  setInterval(reload, AUTO_RELOAD_MS);
+
+  function init(){
+    $("#secInput").value = secPerSlide;
+    $("#sheetInput").value = sheetUrl;
+    $("#todayOnlyInput").checked = todayOnly;
+
+    const startIdx = parseInt(params.get("start"),10);
+    applyTheme();
+    loadData().then(()=>{
+      renderCalSlide();
+      buildSlides();
+      if(!isNaN(startIdx) && startIdx>=0){
+        showSlide(startIdx);
+      }
+      startTimer();
+    });
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

@@ -194,6 +194,9 @@
   <label><input type="checkbox" id="autoLoadSheet"> 毎回自動で読む</label>
   <div class="sep"></div>
   <button id="saveImageBtn">画像で保存(PNG)</button>
+  <div class="sep"></div>
+  <button id="gotoSlideshowBtn">スライドショー</button>
+  <button id="gotoCardsBtn">告知画像</button>
 </div>
 <div id="sheetError"></div>
 
@@ -232,20 +235,17 @@
   </div>
 </div>
 
+<script src="common.js"></script>
 <script>
 (function(){
   "use strict";
 
-  const STORAGE_PREFIX = "eventCalendarKun_"; // 年月ごとの保存キー接頭辞
-  const WEEKDAY_LABELS = ["MON","TUE","WED","THU","FRI","SAT","SUN"];
-  const THEME_COLORS = {
-    navy:{main:"#1e3a6b"},
-    black:{main:"#1a1a1a"},
-    wine:{main:"#6b1e2f"},
-    green:{main:"#1e6b3a"}
-  };
-  const MIN_FONT = 8;   // 自動縮小の下限px
-  const MAX_FONT = 64;  // 自動縮小の上限px(A4実寸のマス高さに対し十分大きく取る)
+  // ---- 共通モジュール(common.js)からの参照 ----
+  const STORAGE_PREFIX = CalKun.STORAGE_PREFIX;
+  const WEEKDAY_LABELS = CalKun.WEEKDAY_LABELS;
+  const THEME_COLORS = CalKun.THEME_COLORS;
+  const MIN_FONT = CalKun.MIN_FONT;
+  const MAX_FONT = CalKun.MAX_FONT;
 
   const $ = (sel)=>document.querySelector(sel);
   const grid = $("#grid");
@@ -265,200 +265,31 @@
   let currentMonth = 9; // 1-12
   let selectedCellKey = null; // "YYYY-MM-DD" 選択中マス(絵文字/画像挿入先)
 
-  // ---- 見本(sample.png)を忠実に転記した初期サンプルデータ ----
-  // 2026年9月のみに紐付く。他の年月は空のまま。
-  const SAMPLE_2026_09 = {
-    "2026-08-31":"20:00-\nディズニー好き会",
-    "2026-09-01":"20:00-\n男女飲み会 🩷",
-    "2026-09-02":"19:00-\n異業種交流会",
-    "2026-09-03":"20:00-\nラブタイプ会\n忠犬ハチ公\n最後の恋人多め！",
-    "2026-09-04":"20:00-\n1998年会",
-    "2026-09-05":"20:00-\n夏祭りイベント 🎆",
-    "2026-09-06":"18:00-\n男女飲み会 🩷",
-    "2026-09-07":"20:00-\nSwitch&ボドゲ会",
-    "2026-09-08":"21:00-\n夢を語る会",
-    "2026-09-09":"20:00-\n男女飲み会 🩷",
-    "2026-09-10":"21:00-\n京久保会",
-    "2026-09-11":"20:00-\nスマブラ会 🎮",
-    "2026-09-12":"21:00-\nマッスル合コン 💪",
-    "2026-09-13":"20:00-\n男女飲み会 🩷",
-    "2026-09-14":"20:00-\n長畑美咲会",
-    "2026-09-15":"20:00-\n大物会",
-    "2026-09-16":"11:00-\n性なるお茶会\n19:00-\n貸切",
-    "2026-09-17":"20:00-\nスポーツ会",
-    "2026-09-18":"20:00-\nシーシャ会",
-    "2026-09-19":"18:00-\n店舗経営者会\n20:00-\n1997年会",
-    "2026-09-20":"19:00-\n街コン 🩷\n22:00-\nマッスル合コン 💪",
-    "2026-09-21":"15:00-\nボドゲ会\n20:00-\n平成カラオケ会 🎤",
-    "2026-09-22":"18:00-\n落語家イベント\n20:00-\nフットサル打上",
-    "2026-09-23":"19:00-\n男女飲み会 🩷",
-    "2026-09-24":"20:00-\n静岡県人会 🗻",
-    "2026-09-25":"21:00-\nさなBirthday 🎉",
-    "2026-09-26":"18:00-\nクロちゃんタコス会 🌮\n21:00-\nMBTI会",
-    "2026-09-27":"19:00-\n貸切",
-    "2026-09-28":"19:00-\n沖縄好き会\n21:00-\n日本酒会 🍶",
-    "2026-09-29":"20:00-\nインフルエンサー会",
-    "2026-09-30":"20:00-\n男女飲み会 🩷"
-  };
-
-  function storageKey(y,m){ return STORAGE_PREFIX + y + "-" + String(m).padStart(2,"0"); }
-
-  function loadMonthData(y,m){
-    const raw = localStorage.getItem(storageKey(y,m));
-    if(raw){
-      try{ return JSON.parse(raw); }catch(e){ /* 壊れたデータは無視して空扱い */ }
-    }
-    // 初回起動(何も保存されていない)かつ2026年9月なら見本データを埋める
-    if(y===2026 && m===9 && localStorage.getItem(STORAGE_PREFIX+"seeded")!== "1"){
-      const seeded = {};
-      Object.keys(SAMPLE_2026_09).forEach(k=>{ seeded[k] = {text:SAMPLE_2026_09[k]}; });
-      return seeded;
-    }
-    return {};
-  }
-
-  function saveMonthData(y,m,data){
-    localStorage.setItem(storageKey(y,m), JSON.stringify(data));
-    if(y===2026 && m===9){ localStorage.setItem(STORAGE_PREFIX+"seeded","1"); }
-  }
-
+  // ---- 保存・日付ヘルパー(common.jsのCalKunへ委譲) ----
+  const storageKey = CalKun.storageKey;
+  const loadMonthData = CalKun.loadMonthData;
+  const saveMonthData = CalKun.saveMonthData;
   let monthData = {}; // 現在表示中の月の日付データ {dateKey:{text? or html}}
+  const dateKey = CalKun.dateKey;
+  const buildDaysList = CalKun.buildDaysList;
+  const applyTheme = CalKun.applyTheme;
 
-  function dateKey(y,m,d){
-    // m,d は表示用の実際の年月日(繰り上がり計算済み)を渡す想定
-    return y+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0");
-  }
+  // ---- 時刻装飾・フィット計算(common.jsのCalKunへ委譲) ----
+  const decorateTimeMarks = CalKun.decorateTimeMarks;
+  const htmlToLines = CalKun.htmlToLines;
+  const getMaxFontFor = CalKun.getMaxFontFor;
+  const fitsWithin = CalKun.fitsWithin;
+  const fitOne = CalKun.fitOne;
 
-  // 指定年月の1日がその月の何日目のグリッド開始位置になるか(月曜始まり)を計算し、
-  // 前月末・当月・翌月頭を含む日付リストを作る
-  function buildDaysList(year, month){
-    const first = new Date(year, month-1, 1);
-    // JSのgetDay(): 0=日,1=月...6=土 → 月曜始まりのオフセットに変換
-    const jsDay = first.getDay();
-    const leadingOffset = (jsDay===0)?6:(jsDay-1);
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const totalCells = Math.ceil((leadingOffset + daysInMonth)/7)*7;
-    const list = [];
-    const start = new Date(year, month-1, 1 - leadingOffset);
-    for(let i=0;i<totalCells;i++){
-      const d = new Date(start);
-      d.setDate(start.getDate()+i);
-      list.push({
-        y:d.getFullYear(), m:d.getMonth()+1, d:d.getDate(),
-        inMonth: d.getMonth()+1===month && d.getFullYear()===year,
-        weekdayIdx: (d.getDay()===0)?6:(d.getDay()-1) // 0=MON...6=SUN
-      });
-    }
-    return list;
-  }
-
-  function applyTheme(name){
-    const c = THEME_COLORS[name] || THEME_COLORS.navy;
-    document.documentElement.style.setProperty("--theme-main", c.main);
-  }
-
-  // 行頭の時刻表記(例"20:00-")を水色マーカー付きspanで装飾する。
-  // 簡易実装: contenteditableの中身をテキスト行単位で見て正規表現一致した行頭だけ包む。
-  // 複雑なカーソル位置保持は行わず、focusが外れた時のみ再構築する(意図的な簡略化)。
-  function decorateTimeMarks(el){
-    const sel = window.getSelection();
-    const hadFocus = document.activeElement===el;
-    if(hadFocus) return; // 編集中は再構築しない(カーソル飛び防止のため装飾はblur時のみ)
-    // 既存の子要素のうち、テキストノード/BR/IMG/SPANのみを対象に行分割して再構成
-    const html = el.innerHTML;
-    if(el.dataset.decorated === html) return; // 変化なければ何もしない
-    const div = document.createElement("div");
-    div.innerHTML = html;
-    // <div>や<br>で区切られた行ごとに処理
-    const lines = htmlToLines(div);
-    const outParts = lines.map(line=>{
-      if(/^<img/i.test(line.trim())) return line; // 画像行はそのまま
-      const m = line.match(/^(\s*)(\d{1,2}:\d{2}-?)/);
-      if(m){
-        const rest = line.slice(m[0].length);
-        return m[1] + '<span class="time-mark">' + m[2] + '</span>' + rest;
-      }
-      return line;
-    });
-    const newHtml = outParts.join("<br>");
-    el.innerHTML = newHtml;
-    el.dataset.decorated = el.innerHTML;
-  }
-
-  function htmlToLines(containerDiv){
-    // innerHTML中の<div>/<br>を行区切りとみなして分割する簡易パーサー
-    // (意図的な簡略化: ネストしたブロック要素や複雑な貼付けHTMLには非対応。プレーンテキスト+br+img前提)
-    const html = containerDiv.innerHTML;
-    return html.split(/<div>|<\/div>|<br\s*\/?>/i).filter(s=>s!==undefined);
-  }
-
-  // マス内の本文が枠に収まる最大フォントサイズを二分探索的に求めて適用する
+  // マス内の本文が枠に収まる最大フォントサイズを求めて適用する
   function autoFitFont(bodyEl){
     if(uniformCheckbox.checked) return; // 均一モードは別関数でまとめて処理
     fitOne(bodyEl);
   }
 
-  // 1マスあたりの上限フォントサイズ。cellの横幅に対して極端に巨大な
-  // フォントにならないよう、64pxと「セル幅/3.2」の小さい方を採用する。
-  function getMaxFontFor(bodyEl){
-    const cell = bodyEl.closest(".cell");
-    const w = (cell && cell.clientWidth) ? cell.clientWidth : (bodyEl.clientWidth || MAX_FONT*3.2);
-    return Math.max(MIN_FONT, Math.min(MAX_FONT, w/3.2));
-  }
-
-  // 指定サイズでbodyEl(群)が枠に収まっているかを厳密に判定する。
-  // - 本文全体(画像込み)がscrollHeight/scrollWidthをはみ出していないか
-  // - 時刻span(.time-mark)が単体で折り返し/切れを起こしていないか(offsetWidthで判定)
-  // 判定前に必ずoffsetHeightを読んでレイアウトを確定させる。
-  // 注意: .cell-bodyはflex:1で高さが固定されるため、内容がその範囲に
-  // 収まっている場合はscrollHeightは常にclientHeightと等しくなる
-  // (scrollHeightはmax(内容の高さ, 自身の高さ)なので、内容が小さくても
-  // clientHeightを下回ることはない)。したがって判定は「同じならOK」の
-  // 等価判定にする必要があり、ここからマージンを引いてはいけない
-  // (引くと常にfalseになり最小サイズに落ちる不具合の原因だった)。
-  const FIT_EPS = 0.5; // 端数誤差だけの許容
-  function fitsWithin(bodyEl){
-    void bodyEl.offsetHeight; // レイアウト確定を強制
-    if(bodyEl.scrollHeight > bodyEl.clientHeight + FIT_EPS) return false;
-    if(bodyEl.scrollWidth > bodyEl.clientWidth + FIT_EPS) return false;
-    const marks = bodyEl.querySelectorAll(".time-mark");
-    for(let i=0;i<marks.length;i++){
-      if(marks[i].offsetWidth > bodyEl.clientWidth + FIT_EPS) return false;
-    }
-    return true;
-  }
-
-  // 画面表示時と印刷(PDF化)時でフォントのヒンティング/カーニングが
-  // 微妙に異なり、ぎりぎり収まったサイズが印刷では1px前後溢れることが
-  // あるため、判定で見つかった最大値からさらに数px差し引いて安全側に倒す。
-  const FIT_SAFETY_STEP = 2;
-
-  // CJKテキストの折り返しはフォントサイズに対して単調とは限らない
-  // (サイズを上げると折返し行数が減って逆に収まる、等が起こりうる)ため、
-  // 二分探索ではなく上限から1pxずつ下げる線形走査で「収まる最大値」を
-  // 確実に求める(整数px・最大64までなので探索コストは小さい)。
-  function fitOne(bodyEl){
-    const hiCap = Math.floor(getMaxFontFor(bodyEl));
-    let best = MIN_FONT;
-    for(let size=hiCap; size>=MIN_FONT; size--){
-      bodyEl.style.fontSize = size+"px";
-      if(fitsWithin(bodyEl)){ best = size; break; }
-    }
-    best = Math.max(MIN_FONT, best - FIT_SAFETY_STEP);
-    bodyEl.style.fontSize = best+"px";
-  }
-
   function fitAllUniform(){
     const bodies = Array.from(grid.querySelectorAll(".cell-body"));
-    if(bodies.length===0) return;
-    const hiCap = Math.floor(Math.min.apply(null, bodies.map(getMaxFontFor)));
-    let best = MIN_FONT;
-    for(let size=hiCap; size>=MIN_FONT; size--){
-      bodies.forEach(b=>b.style.fontSize = size+"px");
-      if(bodies.every(fitsWithin)){ best = size; break; }
-    }
-    best = Math.max(MIN_FONT, best - FIT_SAFETY_STEP);
-    bodies.forEach(b=>b.style.fontSize = best+"px");
+    CalKun.fitAllUniform(bodies);
   }
 
   function refitAll(){
@@ -759,128 +590,15 @@
     sheetErrorEl.classList.remove("show");
   }
 
-  // 簡易CSVパーサー(引用符・カンマ・改行対応、外部ライブラリ不使用)
-  function parseCSV(text){
-    const rows = [];
-    let row = [];
-    let field = "";
-    let inQuotes = false;
-    const s = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    for(let i=0;i<s.length;i++){
-      const c = s[i];
-      if(inQuotes){
-        if(c === '"'){
-          if(s[i+1] === '"'){ field += '"'; i++; }
-          else { inQuotes = false; }
-        }else{
-          field += c;
-        }
-      }else{
-        if(c === '"'){ inQuotes = true; }
-        else if(c === ','){ row.push(field); field = ""; }
-        else if(c === '\n'){ row.push(field); rows.push(row); row = []; field = ""; }
-        else field += c;
-      }
-    }
-    row.push(field);
-    rows.push(row);
-    while(rows.length && rows[rows.length-1].length===1 && rows[rows.length-1][0].trim()===""){
-      rows.pop();
-    }
-    return rows;
-  }
-
-  // "2026/9/5" "9/5" "2026-09-05" のいずれかを {y,mo,d} に正規化する。
-  // 年省略時はfallbackYearを使う。解釈できなければnullを返す。
-  function normalizeDateCell(str, fallbackYear){
-    if(str===undefined || str===null) return null;
-    const t = String(str).trim();
-    if(t==="") return null;
-    let m = t.match(/^(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
-    if(m) return { y:parseInt(m[1],10), mo:parseInt(m[2],10), d:parseInt(m[3],10) };
-    m = t.match(/^(\d{1,2})[\/\-](\d{1,2})$/);
-    if(m) return { y:fallbackYear, mo:parseInt(m[1],10), d:parseInt(m[2],10) };
-    return null;
-  }
-
-  // "20:00" 等を "20:00-" の表示形式に整形する。空文字なら空文字のまま。
-  function normalizeTimeCell(str){
-    if(str===undefined || str===null) return "";
-    const t = String(str).trim();
-    if(t==="") return "";
-    const m = t.match(/^(\d{1,2}):(\d{2})/);
-    if(m) return m[1] + ":" + m[2] + "-";
-    return t;
-  }
-
-  function escapeHtmlText(str){
-    return String(str)
-      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-      .replace(/"/g,"&quot;");
-  }
-
-  function sheetUrlToCsvUrl(rawUrl){
-    const url = String(rawUrl).trim();
-    if(!/^https?:\/\//i.test(url)) return url;
-    if(!/docs\.google\.com/i.test(url)) return url; // Google以外はそのままCSVとして扱う
-    if(/output=csv/i.test(url)) return url; // 「ウェブに公開」のCSV URLはそのまま
-    const idMatch = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
-    if(!idMatch) return url;
-    const id = idMatch[1];
-    const gidMatch = url.match(/[#&?]gid=([0-9]+)/);
-    let out = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv`;
-    if(gidMatch) out += "&gid=" + gidMatch[1];
-    return out;
-  }
-
-  // 1件分のイベント内容をcell-body用のHTMLに整形する(既存の時刻装飾ロジックに乗せる形式)
-  function buildEntryHtml(entry){
-    const lines = [];
-    if(entry.time) lines.push(escapeHtmlText(entry.time));
-    let nameLine = escapeHtmlText(entry.name||"");
-    if(entry.emoji) nameLine += " " + escapeHtmlText(entry.emoji);
-    lines.push(nameLine);
-    if(entry.imgUrl && /^https:\/\//i.test(entry.imgUrl)){
-      lines.push(`<img class="ev-img" src="${escapeHtmlText(entry.imgUrl)}">`);
-    }
-    return lines.join("<br>");
-  }
-
-  function buildCellHtmlFromEntries(entries){
-    return entries.map(buildEntryHtml).join("<br>");
-  }
-
-  // CSVの行配列(header含む)を、表示中の年月に該当する日付キーごとのentries配列にまとめる。
-  // 該当年月以外の行はスキップする(表示中の月分だけ反映するため)。
-  function csvRowsToMonthEntries(rows, year, month){
-    if(!rows.length) throw new Error("empty");
-    const header = rows[0].map(h=>String(h).trim());
-    const idxDate = header.indexOf("日付");
-    if(idxDate === -1) throw new Error("ヘッダーに「日付」列が見つかりません");
-    const idxTime = header.indexOf("時刻");
-    const idxName = header.indexOf("イベント名");
-    const idxEmoji = header.indexOf("絵文字");
-    const idxImg = header.indexOf("画像URL");
-    const byKey = {};
-    for(let r=1;r<rows.length;r++){
-      const row = rows[r];
-      if(!row || row.every(c=>String(c).trim()==="")) continue;
-      const dateCell = row[idxDate];
-      const parsed = normalizeDateCell(dateCell, year);
-      if(!parsed) continue;
-      if(parsed.y !== year || parsed.mo !== month) continue;
-      const key = dateKey(parsed.y, parsed.mo, parsed.d);
-      const entry = {
-        time: idxTime===-1 ? "" : normalizeTimeCell(row[idxTime]),
-        name: idxName===-1 ? "" : String(row[idxName]||"").trim(),
-        emoji: idxEmoji===-1 ? "" : String(row[idxEmoji]||"").trim(),
-        imgUrl: idxImg===-1 ? "" : String(row[idxImg]||"").trim()
-      };
-      if(!byKey[key]) byKey[key] = [];
-      byKey[key].push(entry);
-    }
-    return byKey;
-  }
+  // ---- CSV/シート連携ヘルパー(common.jsのCalKunへ委譲) ----
+  const parseCSV = CalKun.parseCSV;
+  const normalizeDateCell = CalKun.normalizeDateCell;
+  const normalizeTimeCell = CalKun.normalizeTimeCell;
+  const escapeHtmlText = CalKun.escapeHtmlText;
+  const sheetUrlToCsvUrl = CalKun.sheetUrlToCsvUrl;
+  const buildEntryHtml = CalKun.buildEntryHtml;
+  const buildCellHtmlFromEntries = CalKun.buildCellHtmlFromEntries;
+  const csvRowsToMonthEntries = CalKun.csvRowsToMonthEntries;
 
   function applyMonthEntriesToCalendar(byKey){
     const newData = {};
@@ -896,20 +614,8 @@
     clearSheetError();
     const rawUrl = sheetUrlInput.value.trim();
     if(!rawUrl){ showSheetError("シートのURLを入力してください"); return Promise.resolve(); }
-    const csvUrl = sheetUrlToCsvUrl(rawUrl);
-    return fetch(csvUrl)
-      .then(res=>{
-        if(!res.ok){
-          throw new Error("status:" + res.status);
-        }
-        return res.text();
-      })
-      .then(text=>{
-        if(/^\s*<(!doctype|html)/i.test(text)){
-          throw new Error("shared");
-        }
-        const rows = parseCSV(text);
-        const byKey = csvRowsToMonthEntries(rows, currentYear, currentMonth);
+    return CalKun.fetchSheetMonthEntries(rawUrl, currentYear, currentMonth)
+      .then(byKey=>{
         applyMonthEntriesToCalendar(byKey);
       })
       .catch(err=>{
@@ -963,15 +669,7 @@
   // ---- PNG画像保存(html2canvas) ----
   // =====================================================================
 
-  const HTML2CANVAS_URL = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
-  function loadHtml2Canvas(onReady, onFail){
-    if(window.html2canvas){ onReady(); return; }
-    const script = document.createElement("script");
-    script.src = HTML2CANVAS_URL;
-    script.onload = onReady;
-    script.onerror = onFail;
-    document.head.appendChild(script);
-  }
+  const loadHtml2Canvas = CalKun.loadHtml2Canvas;
 
   $("#saveImageBtn").addEventListener("click", ()=>{
     clearSheetError();
@@ -1034,6 +732,24 @@
       fetchAndApplySheet();
     }
   }
+
+  // ---- 他ページへのリンク(同じ年月・シートURLを引き継ぐ) ----
+  function buildLinkParams(){
+    const p = new URLSearchParams();
+    p.set("y", currentYear);
+    p.set("m", currentMonth);
+    const sheet = sheetUrlInput.value.trim();
+    if(sheet) p.set("sheet", sheet);
+    return p.toString();
+  }
+  $("#gotoSlideshowBtn").addEventListener("click", ()=>{
+    persistCurrentMonth();
+    window.location.href = "slideshow.html?" + buildLinkParams();
+  });
+  $("#gotoCardsBtn").addEventListener("click", ()=>{
+    persistCurrentMonth();
+    window.location.href = "cards.html?" + buildLinkParams();
+  });
 
   init();
 })();
