@@ -68,6 +68,7 @@
   #cardDate .wd.sun{color:var(--sun);}
   #cardTime{font-weight:900;color:#8fd0e6;margin-top:2%;}
   #cardName{font-weight:900;line-height:1.2;margin-top:4%;word-break:break-word;}
+  #cardExtra{font-weight:700;line-height:1.3;margin-top:2%;word-break:break-word;opacity:.85;}
 
   #emptyMsg{color:#aaa;font-size:14px;text-align:center;}
 </style>
@@ -111,6 +112,7 @@
           <div id="cardDate"></div>
           <div id="cardTime"></div>
           <div id="cardName"></div>
+          <div id="cardExtra"></div>
         </div>
       </div>
     </div>
@@ -224,6 +226,7 @@
       $("#cardDate").innerHTML = "";
       $("#cardTime").textContent = "";
       $("#cardName").textContent = "";
+      $("#cardExtra").textContent = "";
       $("#cardBgImg").style.display = "none";
       $("#cardGradient").style.display = "none";
       fitScaleWrap(size);
@@ -241,6 +244,10 @@
 
     const nameEl = $("#cardName");
     nameEl.textContent = ev.name || "";
+
+    const extraEl = $("#cardExtra");
+    extraEl.textContent = ev.extra || "";
+    extraEl.style.fontSize = Math.round(size.w*0.03) + "px";
 
     if(ev.imgUrl){
       $("#cardBgImg").src = ev.imgUrl;
@@ -300,7 +307,7 @@
     if(selectedIdx<0 || !events[selectedIdx]) return;
     captureCard().then(canvas=>{
       const ev = events[selectedIdx];
-      downloadCanvas(canvas, `event_${ev.key}.png`);
+      downloadCanvas(canvas, `event_${ev.key}${ev.idx?("-"+(ev.idx+1)):""}.png`);
     }).catch(err=>alert("画像の生成に失敗しました: " + (err&&err.message||err)));
   });
 
@@ -311,7 +318,7 @@
       await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
       try{
         const canvas = await captureCard();
-        downloadCanvas(canvas, `event_${events[i].key}.png`);
+        downloadCanvas(canvas, `event_${events[i].key}${events[i].idx?("-"+(events[i].idx+1)):""}.png`);
       }catch(err){ /* 1件失敗しても続行(意図的な簡略化: 個別エラー通知はしない) */ }
       await new Promise(r=>setTimeout(r, 350));
     }

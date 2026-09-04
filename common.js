@@ -333,9 +333,19 @@
     document.head.appendChild(script);
   }
 
+  // HTML断片(タグ含む)をブラウザにパースさせてテキストへデコードする。
+  // (&amp; 等のHTMLエンティティを実文字に戻すため、正規表現でのタグ除去だけでは不十分)
+  function decodeHtmlLine(line){
+    const span = document.createElement("span");
+    span.innerHTML = line;
+    return (span.textContent || "").trim();
+  }
+
   // ---- 保存済みの月データ({dateKey:{html|text}}) からイベント一覧を作る ----
-  // スライドショー/カード用の共通変換: [{key,y,m,d,time,body}]
-  // bodyのHTMLから先頭の time-mark 相当(HH:MM-)を抜き出し、残りをイベント名として扱う。
+  // スライドショー/カード用の共通変換: [{key,y,m,d,time,name,extra,imgUrl,idx}]
+  // bodyのHTMLから "HH:MM-" 行を区切りとして、1マスに複数イベントがある場合は
+  // 時刻+イベント名の組ごとに別イベント(別カード/別スライド)として分割する。
+  // 時刻行を伴わない直後の行(忠犬ハチ公 等の補足)は、直前イベントの extra として同じカードに残す。
   function extractEventsFromMonthData(monthData, year, month){
     const events = [];
     Object.keys(monthData).forEach(key=>{
@@ -352,28 +362,49 @@
       lines.forEach(line=>{
         const imgMatch = line.match(/<img[^>]*src="([^"]*)"/i);
         if(imgMatch){ imgUrl = imgMatch[1]; return; }
-        const plain = line.replace(/<[^>]+>/g,"").trim();
+        const plain = decodeHtmlLine(line);
         if(plain!=="") textLines.push(plain);
       });
-      // 先頭行が "HH:MM-" ならそれを時刻、残りをイベント名(複数件は改行で連結)として1件にまとめる。
-      // 意図的な簡略化: 1マスに複数イベントがある場合、スライド/カードは1マス=1カード扱いで
-      // 全行をまとめて表示する(個別分割はしない)。
-      let time = "";
-      const nameLines = [];
+
+      // 時刻行(単独 "HH:MM-" または "HH:MM- 名前")を区切りに、サブイベントへ分割する。
+      const subEvents = [];
+      let current = null;
       textLines.forEach(line=>{
-        const tm = line.match(/^(\d{1,2}:\d{2}-?)$/);
-        if(tm && !time){ time = tm[1]; }
-        else nameLines.push(line);
+        const pureTime = line.match(/^(\d{1,2}:\d{2}-?)$/);
+        const inlineTime = line.match(/^(\d{1,2}:\d{2}-?)\s+(.+)$/);
+        if(pureTime){
+          current = { time: pureTime[1], name: "", extra: [] };
+          subEvents.push(current);
+        }else if(inlineTime){
+          current = { time: inlineTime[1], name: inlineTime[2], extra: [] };
+          subEvents.push(current);
+        }else if(current){
+          if(current.name==="") current.name = line;
+          else current.extra.push(line);
+        }else{
+          current = { time: "", name: line, extra: [] };
+          subEvents.push(current);
+        }
       });
-      if(time==="" && nameLines.length){
-        const tm2 = nameLines[0].match(/^(\d{1,2}:\d{2}-?)\s*(.*)$/);
-        if(tm2 && tm2[2]){ time = tm2[1]; nameLines[0] = tm2[2]; }
+
+      if(subEvents.length===0){
+        if(imgUrl==="") return;
+        events.push({ key, y, m:mo, d, time:"", name:"", extra:"", imgUrl, idx:0 });
+        return;
       }
-      const name = nameLines.join(" / ");
-      if(name==="" && imgUrl==="") return;
-      events.push({ key, y, m:mo, d, time, name, imgUrl });
+      subEvents.forEach((sub, idx)=>{
+        if(sub.name==="" && imgUrl==="" && idx>0) return;
+        events.push({
+          key, y, m:mo, d,
+          time: sub.time,
+          name: sub.name,
+          extra: sub.extra.join(" / "),
+          imgUrl: idx===0 ? imgUrl : "",
+          idx
+        });
+      });
     });
-    events.sort((a,b)=> a.key<b.key?-1:a.key>b.key?1:0);
+    events.sort((a,b)=> (a.key!==b.key) ? (a.key<b.key?-1:1) : (a.idx-b.idx));
     return events;
   }
 
